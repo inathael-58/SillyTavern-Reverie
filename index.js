@@ -251,7 +251,7 @@ async function fetchChats(full) {
             if (!raw) break; // an old SillyTavern: the full way
             const fresh = await normalizeAll(raw, rx, reuse);
             // a server that ignored max returned everything
-            const state = raw.length > asked ? 'complete' : windowSettled(fresh, data.byKey, asked);
+            const state = raw.length > asked ? 'complete' : windowSettled(fresh, data.byKey, asked, { got: raw.length });
             if (state === 'complete') return { list: fresh, complete: true, key };
             if (state === 'settled') {
                 const changed = fresh.filter(r => { const old = data.byKey.get(r.key); return !old || chatSig(old) !== chatSig(r) || old.preview !== r.preview; });
@@ -261,7 +261,30 @@ async function fetchChats(full) {
         }
     }
     const raw = (await fetchRecent(0)) ?? await fetchOldWay();
-    return { list: await normalizeAll(raw, rx, reuse), complete: true, key };
+    const list = await normalizeAll(raw, rx, reuse);
+    // chats came back but none matched a card SillyTavern lists: its cards are not all in yet.
+    // Taking that as "no chats" would empty the list and the saved copy; keep them and ask again.
+    if (raw.length && !list.length) throw Object.assign(new Error('SillyTavern ยังโหลดการ์ดไม่เสร็จ'), { notReady: true });
+    return { list, complete: true, key };
+}
+
+/**
+ * Wait until SillyTavern has its cards (APP_READY, or characters listed for a moment, since
+ * groups come in just after them). Until then every chat looks like one of a deleted card.
+ * Gives up after `limit` ms, for a SillyTavern with no cards at all.
+ */
+let appReady = false;
+async function cardsLoaded(limit = 30_000) {
+    const until = Date.now() + limit;
+    let seenAt = 0;
+    while (!appReady && Date.now() < until) {
+        const c = ctx();
+        if (c.characters?.length || c.groups?.length) {
+            if (!seenAt) seenAt = Date.now();
+            else if (Date.now() - seenAt >= 1500) return;
+        }
+        await wait(250);
+    }
 }
 
 /** Rows of characters or groups that no longer exist go; renamed ones get their new name. */
@@ -289,6 +312,8 @@ function saveCache(touched = null) {
     saveChatCache({ v: 2, at: data.at, fullAt: data.fullAt, rxKey: data.rxKey }, data.chats, touched);
 }
 
+let retryTimer = null;
+
 /**
  * Bring the list up to date (callers share the running load). `full`: read every chat again —
  * after a rename or a Clean Sync, where a quick refresh would miss chats that went away.
@@ -303,6 +328,7 @@ function reload({ full = false } = {}) {
     data.loading = (async () => {
         try {
             await cacheReady;
+            await cardsLoaded();
             const doFull = data.wantFull || !data.fullAt || !data.chats.length || Date.now() - data.fullAt > FULL_EVERY;
             data.wantFull = false;
             data.loadingFull = doFull;
@@ -316,9 +342,16 @@ function reload({ full = false } = {}) {
             baselineSeen();
             saveCache(r.complete ? null : [...r.changed.map(c => c.key), ...rec.renamed.map(c => c.key), ...rec.dropped]);
         } catch (e) {
-            console.error(LOG, e);
-            data.error = errText(e);
-            toast.err(`โหลดรายชื่อแชทไม่สำเร็จ: ${data.error}`);
+            if (e.notReady) {
+                // nothing changed: the list on screen stays, and a full read runs again shortly
+                console.warn(LOG, e.message);
+                data.wantFull = true;
+                retryTimer ??= setTimeout(() => { retryTimer = null; reload(); }, 5000);
+            } else {
+                console.error(LOG, e);
+                data.error = errText(e);
+                toast.err(`โหลดรายชื่อแชทไม่สำเร็จ: ${data.error}`);
+            }
         } finally {
             data.loading = null;
             data.loadingFull = false;
@@ -3053,7 +3086,7 @@ function wireEvents() {
     if (E.CHAT_RENAMED) eventSource.on(E.CHAT_RENAMED, ev => { afterRename(ev).catch(e => console.warn(LOG, e)); staleSoon(800, { full: true }); });
     for (const ev of [E.CHAT_DELETED, E.GROUP_CHAT_DELETED].filter(Boolean)) eventSource.on(ev, name => { dropDeleted(name); staleSoon(); });
     for (const ev of [E.CHAT_CREATED, E.GROUP_CHAT_CREATED].filter(Boolean)) eventSource.on(ev, () => staleSoon());
-    if (E.APP_READY) eventSource.on(E.APP_READY, () => { addWandItem(); renderTopbar(); });
+    if (E.APP_READY) eventSource.on(E.APP_READY, () => { appReady = true; addWandItem(); renderTopbar(); });
     document.addEventListener('chatautobackup:synced', () => staleSoon(300, { background: true }));
     // Keep the Sync button's state live while the panel is open.
     setInterval(() => { if (ui.root) ui.renderSync(); }, 2000);

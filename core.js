@@ -5,7 +5,7 @@
 import { isAvatarUrl, withVersion, versionOf } from './lib.js';
 
 export const MODULE = 'chat_browser';
-export const VERSION = '2.9.2'; // keep in sync with manifest.json
+export const VERSION = '2.9.3'; // keep in sync with manifest.json
 export const LOG = '[Reverie]';
 export const BASE_URL = new URL('.', import.meta.url);
 export const CACHE_KEY = 'cb_cache_v1';
@@ -260,6 +260,12 @@ export function isGenerating() {
 // rev: bumped when the list or a link in it changes · at: last refresh · fullAt: last time every
 // chat was read · rxKey: what made the cached previews
 export const data = { chats: [], byKey: new Map(), rev: 0, at: 0, fullAt: 0, rxKey: null, loading: null, loadingFull: false, wantFull: false, error: '' };
+
+/**
+ * The chat list is not known yet: nothing saved on this device and the first read from the
+ * server still running. A card with no chats then means "not loaded", not "has none".
+ */
+export const chatsUnknown = () => !data.at;
 
 export async function post(url, body) {
     const res = await fetch(url, { method: 'POST', headers: ctx().getRequestHeaders(), body: JSON.stringify(body ?? {}), cache: 'no-cache' });

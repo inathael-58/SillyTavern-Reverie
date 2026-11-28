@@ -747,10 +747,12 @@ export function chatSig(c) {
 /**
  * The server lists chats newest-modified first, so after the newest `window` comes back, the
  * rest is unchanged once the oldest few in it (`tail`) are unchanged. A window shorter than
- * asked is every chat there is.
+ * asked (counted as the server sent it: `got`) is every chat there is.
  */
-export function windowSettled(fresh, byKey, asked, tail = 8) {
-    if (fresh.length < asked) return 'complete';
+export function windowSettled(fresh, byKey, asked, { tail = 8, got = fresh.length } = {}) {
+    // `got`: how many the server sent. Rows it sent but we could not place (a card SillyTavern
+    // has not listed) make `fresh` shorter without the window being the whole list.
+    if (got < asked) return 'complete';
     const end = fresh.slice(-tail);
     return end.length && end.every(c => { const old = byKey.get(c.key); return old && chatSig(old) === chatSig(c); }) ? 'settled' : 'more';
 }
