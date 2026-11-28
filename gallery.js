@@ -3,7 +3,7 @@
  * (picture, creator, tags, creator's note and the card's chats).
  */
 
-import { ctx, settings, saveSettings, esc, toast, errText, st, charOf, charIndex, groupOf, thumb, currentKey, isGenerating, data, ui, app, sheet, fullAvatar } from './core.js';
+import { ctx, settings, saveSettings, esc, toast, errText, st, charOf, charIndex, groupOf, thumb, currentKey, isGenerating, data, ui, app, sheet, fullAvatar, chatsUnknown } from './core.js';
 import { addedAt, fullTime, noteText, relTime, tagCounts } from './lib.js';
 import { askGyro, playCardPage } from './fx.js';
 
@@ -448,9 +448,12 @@ export const galleryUi = {
         const cur = currentKey();
         const isOpen = card.chats.some(c => c.key === cur);
         const sel = this.selecting && this.selCards.has(card.id);
-        const sub = card.count ? `${card.count} แชท · ${esc(relTime(card.last))}` : '<span class="rv_nochat">ยังไม่มีแชท</span>';
+        // before the first list arrives, "no chats yet" would be a false alarm: say it is loading
+        const unknown = !card.count && chatsUnknown();
+        const none = unknown ? 'กำลังโหลดแชท…' : 'ยังไม่มีแชท';
+        const sub = card.count ? `${card.count} แชท · ${esc(relTime(card.last))}` : `<span class="rv_nochat">${none}</span>`;
         // only the first screenful fades in one by one; the rest are off screen anyway
-        return `<div class="cb_tile${isOpen ? ' cb_isopen' : ''}${card.unread ? ' cb_unread' : ''}${sel ? ' cb_selected' : ''}${card.count ? '' : ' rv_fresh'}" data-card="${esc(card.id)}" role="button" tabindex="0"${i < 40 ? ` data-a style="--i:${i}"` : ''} aria-label="${esc(card.name)} · ${card.count ? `${card.count} แชท` : 'ยังไม่มีแชท'}">
+        return `<div class="cb_tile${isOpen ? ' cb_isopen' : ''}${card.unread ? ' cb_unread' : ''}${sel ? ' cb_selected' : ''}${card.count || unknown ? '' : ' rv_fresh'}" data-card="${esc(card.id)}" role="button" tabindex="0"${i < 40 ? ` data-a style="--i:${i}"` : ''} aria-label="${esc(card.name)} · ${card.count ? `${card.count} แชท` : none}">
             <div class="cb_cover">${this.coverHtml(m)}</div>
             <div class="cb_tiletop">
                 ${this.selecting ? '<span class="rv_tcheck"><i class="fa-solid fa-check"></i></span>' : ''}
@@ -476,6 +479,9 @@ export const galleryUi = {
         const isOpen = card.chats.some(c => c.key === cur);
         const step = (d, x) => `<button class="cb_iconbtn cb_step" data-step="${d}"${x ? ` title="${esc(x.name)}"` : ' disabled'} aria-label="${d < 0 ? 'การ์ดก่อนหน้า' : 'การ์ดถัดไป'}"><i class="fa-solid fa-chevron-${d < 0 ? 'left' : 'right'}"></i></button>`;
         const tagStyle = t => (t.color ? ` style="--tag-bg:${esc(t.color)};${t.color2 ? `--tag-fg:${esc(t.color2)};` : ''}"` : '');
+        // No chats on the list for this card while the list is still being read: it may have some.
+        // Say so (with the spinner) instead of "no chats yet", which looked like the chats were lost.
+        const checking = !card.count && (chatsUnknown() || !!data.loading);
         // back / position / prev-next sit under the header, outside the scrolling list
         this.root.querySelector('.cb_cardnav').innerHTML = `
                 <button class="cb_back" data-back="1"><i class="fa-solid fa-chevron-left"></i><span>การ์ดทั้งหมด</span></button>
@@ -491,7 +497,7 @@ export const galleryUi = {
                         ${creditHtml(m.creator, { icon: 'fa-solid fa-feather-pointed', title: 'ผู้สร้างการ์ด' })}
                         ${creditHtml(m.version, { prefix: 'v', title: 'เวอร์ชันการ์ด', maxText: 16 })}
                         ${card.count ? `<span><i class="fa-regular fa-comments"></i>${card.count} แชท</span>
-                        <span><i class="fa-regular fa-message"></i>${card.total.toLocaleString('th-TH')} ข้อความ</span>` : '<span class="rv_nochat"><i class="fa-regular fa-comments"></i>ยังไม่มีแชท</span>'}
+                        <span><i class="fa-regular fa-message"></i>${card.total.toLocaleString('th-TH')} ข้อความ</span>` : `<span class="rv_nochat"><i class="fa-regular fa-comments"></i>${checking ? 'กำลังโหลดแชท…' : 'ยังไม่มีแชท'}</span>`}
                         ${card.last ? `<span title="${esc(fullTime(card.last))}"><i class="fa-regular fa-clock"></i>${esc(relTime(card.last))}</span>` : ''}
                     </div>
                     ${m.members?.length ? `<div class="cb_members">${m.members.map(x => `<span title="${esc(x.name)}"><img src="${esc(x.thumb)}" alt="" loading="lazy">${esc(x.name)}</span>`).join('')}</div>` : ''}
@@ -509,8 +515,10 @@ export const galleryUi = {
                 <div class="cb_cnotetext">${esc(m.note)}</div>
                 <button class="cb_notemore" data-note="1"${this.noteOpen ? '' : ' hidden'}>${this.noteOpen ? 'ย่อ<i class="fa-solid fa-chevron-up"></i>' : 'อ่านต่อ<i class="fa-solid fa-chevron-down"></i>'}</button>
             </div>` : ''}
-            <div class="cb_cardchats"><i class="fa-regular fa-comments"></i>แชทของการ์ดนี้<span>${card.count}</span></div>
-            ${this.entries.length ? '' : '<div class="cb_empty"><i class="fa-regular fa-comments"></i><span>ยังไม่มีแชท<br><small>แตะ “เริ่มแชทใหม่” เพื่อคุยกับการ์ดนี้</small></span></div>'}
+            <div class="cb_cardchats"><i class="fa-regular fa-comments"></i>แชทของการ์ดนี้<span>${checking ? '<i class="fa-solid fa-circle-notch fa-spin"></i>' : card.count}</span></div>
+            ${this.entries.length ? '' : checking
+                ? '<div class="cb_empty"><i class="fa-solid fa-circle-notch fa-spin"></i><span>กำลังโหลดรายชื่อแชท…<br><small>แชทไม่ได้หาย รอสักครู่</small></span></div>'
+                : '<div class="cb_empty"><i class="fa-regular fa-comments"></i><span>ยังไม่มีแชท<br><small>แตะ “เริ่มแชทใหม่” เพื่อคุยกับการ์ดนี้</small></span></div>'}
         </div>`;
     },
 

@@ -15,6 +15,17 @@ test('a window shorter than asked is every chat', () => {
     assert.equal(windowSettled([row(1), row(2)], new Map(), 40), 'complete');
 });
 
+test('a full window with rows that could not be placed is not every chat', () => {
+    // the server sent 40, but 2 were of a card SillyTavern had not listed: there may be more
+    const cached = Array.from({ length: 40 }, (_, i) => row(i));
+    const byKey = new Map(cached.map(c => [c.key, c]));
+    const fresh = cached.slice(0, 38).map(c => ({ ...c, count: 99 }));
+    assert.equal(windowSettled(fresh, byKey, 40), 'complete'); // what it got wrong before
+    assert.equal(windowSettled(fresh, byKey, 40, { got: 40 }), 'more');
+    assert.equal(windowSettled([], new Map(), 40, { got: 40 }), 'more');
+    assert.equal(windowSettled([row(1)], new Map(), 40, { got: 3 }), 'complete');
+});
+
 test('settled once the oldest rows in the window are unchanged', () => {
     const cached = Array.from({ length: 40 }, (_, i) => row(i));
     const byKey = new Map(cached.map(c => [c.key, c]));
